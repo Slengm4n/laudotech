@@ -131,10 +131,10 @@ export default function DashboardPage() {
             </nav>
           </div>
           <Link
-            href="/laudos/novo"
+            href="/visitas/nova"
             className="bg-gray-900 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-gray-800 transition font-medium"
           >
-            + Nova visita
+            + Nova visitas
           </Link>
         </div>
       </header>
