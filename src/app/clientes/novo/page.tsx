@@ -4,46 +4,60 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import { toast, Toaster } from 'sonner'
+
+// ─── MÁSCARAS E FORMATAÇÃO ───
+const formatarCPF = (v: string) => v.replace(/\D/g, '').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2').slice(0, 14)
+const formatarCNPJ = (v: string) => v.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1/$2').replace(/(\d{4})(\d{1,2})$/, '$1-$2').slice(0, 18)
+const formatarCEP = (v: string) => v.replace(/\D/g, '').replace(/(\d{5})(\d)/, '$1-$2').slice(0, 9)
+const formatarTelefone = (v: string) => {
+  let r = v.replace(/\D/g, '')
+  if (r.length > 11) r = r.slice(0, 11)
+  if (r.length > 10) return r.replace(/^(\d{2})(\d{5})(\d{4}).*/, '($1) $2-$3')
+  if (r.length > 5) return r.replace(/^(\d{2})(\d{4})(\d{0,4}).*/, '($1) $2-$3')
+  if (r.length > 2) return r.replace(/^(\d{2})(\d{0,5})/, '($1) $2')
+  return r
+}
 
 export default function NovoClientePage() {
   const router = useRouter()
   const [salvando, setSalvando] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
 
-  // O estado agora controla o tipo de pessoa (PJ ou PF) e usa 'documento' em vez de cnpj
+  // Controle de Pessoa Física ou Jurídica
+  const [tipoPessoa, setTipoPessoa] = useState<'J' | 'F'>('J')
+
+  // Dados básicos
   const [form, setForm] = useState({
-    tipoPessoa: 'PJ' as 'PJ' | 'PF',
     nome: '',
     documento: '',
-    email: '',
     telefone: '',
     contato_nome: '',
-    cep: '',
-    logradouro: '',
-    numero: '',
-    complemento: '',
-    bairro: '',
-    cidade: '',
-    uf: '',
+    email: ''
   })
 
-  // ─── Helpers: Máscaras de Input ───
-  const maskCPF = (v: string) => v.replace(/\D/g, '').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2').substring(0, 14)
-  const maskCNPJ = (v: string) => v.replace(/\D/g, '').replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d)/, "$1-$2").substring(0, 18)
-  const maskTelefone = (v: string) => v.replace(/\D/g, '').replace(/^(\d{2})(\d)/g, "($1) $2").replace(/(\d)(\d{4})$/, "$1-$2").substring(0, 15)
-  const maskCEP = (v: string) => v.replace(/\D/g, '').replace(/^(\d{5})(\d)/, "$1-$2").substring(0, 9)
+  // Dados de Endereço (Separados para o ViaCEP)
+  const [end, setEnd] = useState({
+    cep: '', logradouro: '', numero: '', complemento: '', bairro: '', localidade: '', uf: ''
+  })
 
-  const handleDocumentoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const valor = e.target.value
-    setForm({
-      ...form,
-      documento: form.tipoPessoa === 'PJ' ? maskCNPJ(valor) : maskCPF(valor)
-    })
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let { name, value } = e.target
+    if (name === 'telefone') value = formatarTelefone(value)
+    if (name === 'documento') value = tipoPessoa === 'J' ? formatarCNPJ(value) : formatarCPF(value)
+    setForm({ ...form, [name]: value })
   }
 
-  // ─── Busca de CEP via API (ViaCEP) ───
-  const handleBuscarCep = async (cepParaBuscar: string) => {
-    const cepLimpo = cepParaBuscar.replace(/\D/g, '')
+  const handleEndChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let { name, value } = e.target
+    if (name === 'cep') value = formatarCEP(value)
+    setEnd({ ...end, [name]: value })
+  }
+
+  // ─── INTEGRAÇÃO VIACEP ───
+  const buscarCep = async () => {
+    const cepLimpo = end.cep.replace(/\D/g, '')
     if (cepLimpo.length !== 8) return
 
     setBuscandoCep(true)
@@ -51,283 +65,167 @@ export default function NovoClientePage() {
       const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`)
       const data = await res.json()
       
-      if (!data.erro) {
-        setForm(prev => ({
-          ...prev,
-          logradouro: data.logradouro,
-          bairro: data.bairro,
-          cidade: data.localidade,
-          uf: data.uf,
-        }))
-        document.getElementById('numero_end')?.focus()
-      } else {
-        alert("CEP não encontrado.")
+      if (data.erro) {
+        toast.error('CEP não encontrado.')
+        return
       }
+
+      setEnd(prev => ({
+        ...prev,
+        logradouro: data.logradouro,
+        bairro: data.bairro,
+        localidade: data.localidade,
+        uf: data.uf
+      }))
+      toast.success('Endereço preenchido!')
+      
+      // Foca automaticamente no campo "Número" após achar o CEP
+      document.getElementById('input-numero')?.focus()
     } catch (error) {
-      console.error("Erro ao buscar CEP", error)
+      toast.error('Erro ao buscar o CEP.')
     } finally {
       setBuscandoCep(false)
     }
   }
 
+  // ─── SALVAR NO SUPABASE ───
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault()
     setSalvando(true)
 
-    const enderecoCompleto = `${form.logradouro}, ${form.numero} ${form.complemento ? '- ' + form.complemento : ''} - ${form.bairro}, ${form.cidade} - ${form.uf}, CEP: ${form.cep}`
+    // Junta os campos de endereço em uma string só para caber na sua tabela atual
+    const enderecoCompleto = `${end.logradouro}, ${end.numero}${end.complemento ? ' - ' + end.complemento : ''} - ${end.bairro}, ${end.localidade} - ${end.uf}, CEP: ${end.cep}`
 
-    const dadosParaSalvar = {
-      tipo_pessoa: form.tipoPessoa,
-      nome: form.nome,
-      cnpj: form.documento, // No banco continua salvando na coluna cnpj (ou você pode renomear a coluna depois)
-      email: form.email,
-      telefone: form.telefone,
-      contato_nome: form.tipoPessoa === 'PJ' ? form.contato_nome : '', // Se for PF, não precisa de representante
-      endereco: enderecoCompleto
+    const payload = {
+      ...form,
+      endereco: end.logradouro ? enderecoCompleto : '' // Salva vazio se não preencheu a rua
     }
 
     try {
-      console.log("Salvando cliente:", dadosParaSalvar)
-      await new Promise(r => setTimeout(r, 1000))
-      alert("Cliente cadastrado com sucesso!")
-      router.push('/dashboard') 
+      const { error } = await supabase.from('clientes').insert([payload])
+      if (error) throw error
+
+      toast.success('Cliente cadastrado com sucesso! 🎉')
+      setTimeout(() => router.push('/clientes'), 1000) 
     } catch (error) {
-      alert("Erro ao cadastrar.")
-    } finally {
+      toast.error('Erro ao cadastrar cliente. Verifique os dados.')
       setSalvando(false)
     }
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
+  // Troca o tipo de pessoa e limpa o documento
+  const alterarTipoPessoa = (tipo: 'J' | 'F') => {
+    setTipoPessoa(tipo)
+    setForm({ ...form, documento: '' })
+  }
 
-      {/* ── Navbar ── */}
+  return (
+    <div className="min-h-screen bg-gray-50 pb-20">
+      <Toaster position="top-right" richColors />
+
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <span className="text-base font-semibold text-gray-900">LaudoTech</span>
-            <nav className="hidden md:flex items-center gap-1">
-              {[
-                { href: '/dashboard', label: 'Dashboard' },
-                { href: '/laudos', label: 'Laudos' },
-                { href: '/financeiro', label: 'Financeiro' },
-                { href: '/clientes', label: 'Clientes' },
-              ].map(item => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition ${
-                    item.href === '/clientes'
-                      ? 'bg-gray-100 text-gray-900 font-medium'
-                      : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-          <Link href="/dashboard" className="text-sm text-gray-500 hover:text-gray-900 font-medium transition">
-            Sair
-          </Link>
+        <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-4">
+          <Link href="/clientes" className="text-gray-400 hover:text-gray-900 transition">← Voltar</Link>
+          <span className="text-base font-semibold text-gray-900">Novo Cliente</span>
         </div>
       </header>
 
-      {/* ── Main (Centralizado) ── */}
-      <main className="max-w-5xl mx-auto px-4 py-8 flex flex-col items-center space-y-8">
-
-        {/* Título Centralizado com a mesma largura do Card */}
-        <div className="w-full max-w-3xl">
-          <h1 className="text-xl font-semibold text-gray-900">Cadastrar novo cliente</h1>
-          <p className="text-sm text-gray-500">Adicione os dados do cliente para vincular às visitas e laudos.</p>
-        </div>
-
-        {/* ── Card do Formulário (mx-auto para garantir) ── */}
-        <div className="w-full max-w-3xl bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mx-auto">
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <form onSubmit={handleSalvar} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
           
-          <form onSubmit={handleSalvar}>
+          {/* ── 1. DADOS DA EMPRESA / PESSOA ── */}
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Dados Principais</h2>
+                <p className="text-sm text-gray-500 mt-1">Identificação do cliente.</p>
+              </div>
+              
+              {/* Toggle Dinâmico */}
+              <div className="flex bg-gray-100 p-1 rounded-lg">
+                <button type="button" onClick={() => alterarTipoPessoa('J')} className={`px-4 py-1.5 text-xs font-medium rounded-md transition ${tipoPessoa === 'J' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Empresa (CNPJ)</button>
+                <button type="button" onClick={() => alterarTipoPessoa('F')} className={`px-4 py-1.5 text-xs font-medium rounded-md transition ${tipoPessoa === 'F' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Física (CPF)</button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">{tipoPessoa === 'J' ? 'Razão Social / Nome Fantasia *' : 'Nome Completo *'}</label>
+                <input required type="text" name="nome" value={form.nome} onChange={handleFormChange} placeholder={tipoPessoa === 'J' ? "Ex: Indústria Alfa Ltda" : "Ex: João da Silva"} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">{tipoPessoa === 'J' ? 'CNPJ' : 'CPF'}</label>
+                <input type="text" name="documento" value={form.documento} onChange={handleFormChange} placeholder={tipoPessoa === 'J' ? "00.000.000/0001-00" : "000.000.000-00"} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Email Principal</label>
+                <input type="email" name="email" value={form.email} onChange={handleFormChange} placeholder="contato@empresa.com.br" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Nome do Contato</label>
+                <input type="text" name="contato_nome" value={form.contato_nome} onChange={handleFormChange} placeholder="Ex: Carlos (Gerente)" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">WhatsApp / Telefone</label>
+                <input type="text" name="telefone" value={form.telefone} onChange={handleFormChange} placeholder="(11) 99999-9999" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+            </div>
+          </div>
+
+          {/* ── 2. ENDEREÇO COM VIACEP ── */}
+          <div className="p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Localização da Obra / Matriz</h2>
             
-            {/* SESSÃO 1: Dados Institucionais / Pessoais */}
-            <div className="px-6 py-5 border-b border-gray-100">
-              
-              {/* Seletor PF / PJ */}
-              <div className="flex bg-gray-100 p-1 rounded-lg w-fit mb-6">
-                <button 
-                  type="button" 
-                  onClick={() => setForm({...form, tipoPessoa: 'PJ', documento: '', nome: '', contato_nome: ''})} 
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${form.tipoPessoa === 'PJ' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Pessoa Jurídica
-                </button>
-                <button 
-                  type="button" 
-                  onClick={() => setForm({...form, tipoPessoa: 'PF', documento: '', nome: '', contato_nome: ''})} 
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${form.tipoPessoa === 'PF' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Pessoa Física
-                </button>
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+              <div className="md:col-span-2 relative">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">CEP</label>
+                <input type="text" name="cep" value={end.cep} onChange={handleEndChange} onBlur={buscarCep} placeholder="00000-000" maxLength={9} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+                {buscandoCep && <span className="absolute right-3 top-9 text-xs text-blue-500 font-medium">Buscando...</span>}
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">
-                    {form.tipoPessoa === 'PJ' ? 'Razão Social / Nome Fantasia *' : 'Nome Completo *'}
-                  </label>
-                  <input 
-                    type="text" required 
-                    placeholder={form.tipoPessoa === 'PJ' ? "Ex: Indústria de Alimentos S.A." : "Ex: João Carlos da Silva"}
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.nome} onChange={(e) => setForm({...form, nome: e.target.value})}
-                  />
-                </div>
 
-                <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">
-                    {form.tipoPessoa === 'PJ' ? 'CNPJ' : 'CPF'}
-                  </label>
-                  <input 
-                    type="text" 
-                    placeholder={form.tipoPessoa === 'PJ' ? "00.000.000/0001-00" : "000.000.000-00"}
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.documento} onChange={handleDocumentoChange}
-                  />
-                </div>
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Rua / Logradouro</label>
+                <input type="text" name="logradouro" value={end.logradouro} onChange={handleEndChange} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Número</label>
+                <input id="input-numero" type="text" name="numero" value={end.numero} onChange={handleEndChange} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Complemento</label>
+                <input type="text" name="complemento" value={end.complemento} onChange={handleEndChange} placeholder="Ex: Galpão 3, Sala 2" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Bairro</label>
+                <input type="text" name="bairro" value={end.bairro} onChange={handleEndChange} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">Cidade</label>
+                <input type="text" name="localidade" value={end.localidade} onChange={handleEndChange} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition" />
+              </div>
+
+              <div className="md:col-span-1">
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1.5">UF</label>
+                <input type="text" name="uf" value={end.uf} onChange={handleEndChange} maxLength={2} className="w-full bg-gray-50 border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-gray-900 focus:bg-white transition uppercase" />
               </div>
             </div>
+          </div>
 
-            {/* SESSÃO 2: Contato */}
-            <div className="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
-              <h2 className="text-sm font-semibold text-gray-900 mb-5">Dados de Contato</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                
-                {/* Oculta o campo Representante se for Pessoa Física */}
-                {form.tipoPessoa === 'PJ' && (
-                  <div className="md:col-span-1">
-                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Representante</label>
-                    <input 
-                      type="text" placeholder="Ex: Carlos (Gerente)"
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                      value={form.contato_nome} onChange={(e) => setForm({...form, contato_nome: e.target.value})}
-                    />
-                  </div>
-                )}
-
-                <div className={`md:col-span-1 ${form.tipoPessoa === 'PF' ? 'md:col-span-2' : ''}`}>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Telefone / WhatsApp</label>
-                  <input 
-                    type="text" placeholder="(11) 99999-9999"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.telefone} onChange={(e) => setForm({...form, telefone: maskTelefone(e.target.value)})}
-                  />
-                </div>
-
-                <div className={`md:col-span-1 ${form.tipoPessoa === 'PF' ? 'md:col-span-1' : ''}`}>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">E-mail para Laudos</label>
-                  <input 
-                    type="email" placeholder="contato@email.com"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.email} onChange={(e) => setForm({...form, email: e.target.value})}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* SESSÃO 3: Endereço Inteligente */}
-            <div className="px-6 py-5">
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-sm font-semibold text-gray-900">Endereço de Visita</h2>
-                {buscandoCep && <span className="text-xs text-blue-600 animate-pulse font-medium">Buscando CEP...</span>}
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-6 gap-5">
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">CEP</label>
-                  <input 
-                    type="text" placeholder="00000-000"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.cep} 
-                    onChange={(e) => {
-                      const novoCep = maskCEP(e.target.value)
-                      setForm({...form, cep: novoCep})
-                      if (novoCep.length === 9) handleBuscarCep(novoCep)
-                    }}
-                  />
-                </div>
-
-                <div className="md:col-span-4">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Logradouro / Rua</label>
-                  <input 
-                    type="text" required placeholder="Rua, Avenida, etc."
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.logradouro} onChange={(e) => setForm({...form, logradouro: e.target.value})}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Número *</label>
-                  <input 
-                    id="numero_end" type="text" required placeholder="Ex: 123"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.numero} onChange={(e) => setForm({...form, numero: e.target.value})}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Complemento</label>
-                  <input 
-                    type="text" placeholder="Apto 12, Sala 2"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.complemento} onChange={(e) => setForm({...form, complemento: e.target.value})}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Bairro</label>
-                  <input 
-                    type="text" required
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.bairro} onChange={(e) => setForm({...form, bairro: e.target.value})}
-                  />
-                </div>
-
-                <div className="md:col-span-4">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Cidade</label>
-                  <input 
-                    type="text" required
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition"
-                    value={form.cidade} onChange={(e) => setForm({...form, cidade: e.target.value})}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">UF</label>
-                  <input 
-                    type="text" required placeholder="SP" maxLength={2}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition uppercase"
-                    value={form.uf} onChange={(e) => setForm({...form, uf: e.target.value})}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Ações */}
-            <div className="px-6 py-5 bg-gray-50 border-t border-gray-100 flex items-center justify-between rounded-b-xl">
-              <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-900 transition">
-                Cancelar
-              </Link>
-              <button 
-                type="submit" 
-                disabled={salvando}
-                className="bg-gray-900 text-white text-sm px-8 py-2 rounded-lg hover:bg-gray-800 transition font-medium disabled:opacity-50"
-              >
-                {salvando ? 'Salvando...' : 'Salvar Cliente'}
-              </button>
-            </div>
-
-          </form>
-        </div>
-
+          <div className="bg-gray-50 p-6 border-t border-gray-200 flex justify-end gap-3">
+            <Link href="/clientes" className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition">Cancelar</Link>
+            <button type="submit" disabled={salvando} className="bg-gray-900 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-gray-800 transition disabled:opacity-50 shadow-sm">
+              {salvando ? 'Salvando...' : 'Salvar Cliente'}
+            </button>
+          </div>
+        </form>
       </main>
     </div>
   )

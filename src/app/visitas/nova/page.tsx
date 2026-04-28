@@ -15,7 +15,7 @@ export default function NovaVisitaPage() {
   // ─── ESTADOS DA VISITA ───
   const [salvandoVisita, setSalvandoVisita] = useState(false)
   const [formVisita, setFormVisita] = useState({
-    tecnico_nome: '',
+    tecnico_nome: 'Jefferson Slengman',
     tecnico_crea: '',
     data_agendada: new Date().toISOString().split('T')[0],
     modalidade: 'planejada',
