@@ -4,75 +4,68 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { toast, Toaster } from 'sonner'
+import { error } from 'console'
 
-export default function LaudosListPage() {
+export default function CentralLaudosPage() {
   const [laudos, setLaudos] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
   const [busca, setBusca] = useState('')
 
-  useEffect(() => {
-    async function carregarLaudosProntos() {
-      try {
-        const { data, error } = await supabase
-          .from('visitas')
-          .select(`*, clientes (nome)`)
-          .eq('status', 'concluida')
-          .order('finalizado_em', { ascending: false })
+  // Controle de quais clientes estão expandidos (abertos)
+  const [clientesExpandidos, setClientesExpandidos] = useState<string[]>([])
 
-        if (error) throw error
-        setLaudos(data || [])
-      } catch (error) {
-        toast.error("Erro ao carregar os laudos.")
-      } finally {
-        setCarregando(false)
-      }
+  useEffect(() => {
+    async function carregarLaudos() {
+      // Puxa apenas visitas que foram finalizadas (que geraram laudo)
+      const { data, error } = await supabase
+        .from('visitas')
+        .select('*, clientes(*)')
+        .eq('status', 'concluida')
+        .order('criado_em', { ascending: false })
+
+      if (data) setLaudos(data)
+      if (data) setLaudos(data)
+      setCarregando(false)
     }
-    carregarLaudosProntos()
+    carregarLaudos()
   }, [])
 
-  // ─── HELPERS DE FORMATAÇÃO ───
-  const formatarData = (iso?: string) => {
-    if (!iso) return '-'
-    return new Date(iso).toLocaleDateString('pt-BR')
-  }
+  const formatarData = (iso: string) => new Date(iso).toLocaleDateString('pt-BR')
 
-  // Pega apenas a primeira parte do UUID para virar um número de OS amigável
-  const formatarOS = (id: string) => {
-    if (!id) return ''
-    return id.split('-')[0].toUpperCase()
-  }
+  // Agrupamento Inteligente por Cliente
+  const laudosAgrupados = laudos.reduce((acc, laudo) => {
+    const nomeCliente = laudo.clientes?.nome || 'Cliente Excluído/Sem Nome'
+    if (!acc[nomeCliente]) {
+      acc[nomeCliente] = { id: laudo.cliente_id, laudos: [] }
+    }
+    acc[nomeCliente].laudos.push(laudo)
+    return acc
+  }, {} as Record<string, { id: string, laudos: any[] }>)
 
-  // ─── LÓGICA DE AGRUPAMENTO ───
-  // 1. Primeiro filtramos pela busca do usuário
-  const laudosFiltrados = laudos.filter(laudo => 
-    laudo.clientes?.nome?.toLowerCase().includes(busca.toLowerCase()) ||
-    laudo.id.toLowerCase().includes(busca.toLowerCase())
+  // Filtro de Busca
+  const clientesFiltrados = Object.entries(laudosAgrupados).filter(([nomeCliente]) =>
+    nomeCliente.toLowerCase().includes(busca.toLowerCase())
   )
 
-  // 2. Depois agrupamos os laudos filtrados pelo nome do cliente
-  const laudosAgrupados = laudosFiltrados.reduce((acumulador: any, laudo) => {
-    const nomeCliente = laudo.clientes?.nome || 'Cliente Não Identificado'
-    if (!acumulador[nomeCliente]) {
-      acumulador[nomeCliente] = []
-    }
-    acumulador[nomeCliente].push(laudo)
-    return acumulador
-  }, {})
+  // Função para abrir/fechar a lista de um cliente
+  const toggleCliente = (nomeCliente: string) => {
+    setClientesExpandidos(prev =>
+      prev.includes(nomeCliente)
+        ? prev.filter(n => n !== nomeCliente) // Fecha se já estiver aberto
+        : [...prev, nomeCliente] // Abre se estiver fechado
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
-      <Toaster position="top-right" richColors />
-
-      {/* ── Navbar ── */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <span className="text-base font-semibold text-gray-900">LaudoTech</span>
             <nav className="hidden md:flex items-center gap-1">
-              {['Dashboard', 'Visitas', 'Laudos', 'Clientes'].map(item => (
+              {['Dashboard', 'Visitas', 'Laudos', 'Clientes', 'Orcamentos'].map(item => (
                 <Link key={item} href={`/${item.toLowerCase()}`} className={`px-3 py-1.5 rounded-lg text-sm transition ${item === 'Laudos' ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}>
-                  {item}
+                  {item === 'Orcamentos' ? 'Orçamentos' : item}
                 </Link>
               ))}
             </nav>
@@ -80,90 +73,88 @@ export default function LaudosListPage() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        
-        {/* Cabeçalho e Busca */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <main className="max-w-5xl mx-auto px-4 py-8">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Central de Laudos</h1>
             <p className="text-sm text-gray-500">Histórico de documentos organizados por cliente.</p>
           </div>
-          
-          <div className="w-full md:w-72 relative">
+          <div className="relative w-full md:w-72">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-            <input 
-              type="text" 
-              placeholder="Buscar cliente ou OS..." 
+            <input
+              type="text"
+              placeholder="Buscar cliente..."
               value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm outline-none focus:border-gray-900 transition shadow-sm"
+              onChange={e => setBusca(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm outline-none focus:border-gray-900 shadow-sm"
             />
           </div>
         </div>
 
-        {/* Lista Agrupada */}
         {carregando ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500 text-sm shadow-sm">
-            Buscando histórico...
-          </div>
-        ) : Object.keys(laudosAgrupados).length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-12 text-center shadow-sm">
-            <span className="text-4xl block mb-3">🗂️</span>
+          <div className="text-center py-10 text-gray-500 text-sm">Carregando histórico...</div>
+        ) : clientesFiltrados.length === 0 ? (
+          <div className="text-center py-16 bg-white border border-gray-200 rounded-xl">
+            <span className="text-4xl block mb-3">📁</span>
             <p className="text-gray-900 font-medium">Nenhum laudo encontrado.</p>
-            <p className="text-sm text-gray-500 mt-1">Tente buscar por outro termo ou conclua uma vistoria.</p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {Object.entries(laudosAgrupados).map(([cliente, listaDeLaudos]: [string, any]) => (
-              
-              /* CARD DO CLIENTE */
-              <div key={cliente} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                
-                {/* Título do Cliente */}
-                <div className="bg-gray-50 border-b border-gray-200 px-5 py-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xl">🏢</span>
-                    <h2 className="font-bold text-gray-900 text-lg">{cliente}</h2>
-                  </div>
-                  <span className="text-xs font-medium bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-md shadow-sm">
-                    {listaDeLaudos.length} laudo(s)
-                  </span>
-                </div>
+          <div className="space-y-3">
+            {/* 1. Aqui colocamos o [string, any] para o TS reconhecer a variável 'dados' */}
+            {clientesFiltrados.map(([nomeCliente, dados]: [string, any]) => {
+              const estaAberto = clientesExpandidos.includes(nomeCliente)
 
-                {/* Lista de Laudos desse Cliente */}
-                <div className="divide-y divide-gray-100">
-                  {listaDeLaudos.map((laudo: any) => (
-                    <div key={laudo.id} className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-blue-50/50 transition group">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">
-                            OS #{formatarOS(laudo.id)}
-                          </span>
-                          <span className="text-sm font-semibold text-gray-900">{formatarData(laudo.finalizado_em)}</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1.5">
-                          Técnico Responsável: <span className="font-medium text-gray-700">{laudo.tecnico_nome}</span>
-                        </p>
-                      </div>
-                      
-                      <div className="flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <Link 
-                          href={`/laudos/${laudo.id}`} 
-                          target="_blank" // Abre em nova aba para não sair da lista!
-                          className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition shadow-sm flex items-center gap-2"
-                        >
-                          🖨️ Imprimir / PDF
-                        </Link>
-                      </div>
+              return (
+                <div key={nomeCliente} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm transition-all">
+
+                  {/* CABEÇALHO DA EMPRESA (Clicável) */}
+                  <button
+                    onClick={() => toggleCliente(nomeCliente)}
+                    className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">🏢</span>
+                      <h2 className="font-bold text-gray-900">{nomeCliente}</h2>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded-md">
+                        {dados.laudos.length} laudo(s)
+                      </span>
+                      <span className={`text-gray-400 transition-transform duration-300 ${estaAberto ? 'rotate-180' : ''}`}>▼</span>
+                    </div>
+                  </button>
 
-              </div>
-            ))}
+                  {/* LISTA DE LAUDOS (Oculta por padrão) */}
+                  {estaAberto && (
+                    <div className="border-t border-gray-100 bg-gray-50/50 p-2 divide-y divide-gray-100">
+                      {/* 2. Aqui colocamos o (laudo: any) */}
+                      {dados.laudos.map((laudo: any) => (
+                        <div key={laudo.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-white rounded-lg transition gap-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-bold text-gray-500 bg-gray-200 px-2 py-0.5 rounded uppercase tracking-wider">
+                                OS #{laudo.id.split('-')[0]}
+                              </span>
+                              <span className="text-sm font-bold text-gray-900">{formatarData(laudo.criado_em)}</span>
+                            </div>
+                            <p className="text-xs text-gray-500">Téc: {laudo.tecnico_nome || 'Slengman Engenharia'}</p>
+                          </div>
+                          <Link
+                            href={`/laudos/${laudo.id}`}
+                            className="bg-gray-900 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-800 transition shadow-sm text-center"
+                          >
+                            🖨️ Abrir PDF
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
+              )
+            })}
           </div>
         )}
-
       </main>
     </div>
   )

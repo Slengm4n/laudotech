@@ -1,5 +1,5 @@
 'use client'
-// src/app/visitas/[id]/page.tsx — v2 corrigida
+// src/app/visitas/[id]/page.tsx — v3 corrigida
 
 import { useState, useEffect, use, useRef, useCallback } from 'react'
 import Link from 'next/link'
@@ -16,13 +16,13 @@ interface ItemChecklist {
   titulo: string
   status: StatusItem
   obs: string
-  fotos: string[] // base64 agora, não mais objectURL
+  fotos: string[]
 }
 
 interface DadosVistoria {
   itens: ItemChecklist[]
   resumo: string
-  fotosGerais: string[] // base64
+  fotosGerais: string[]
   tempo_acumulado: number
   ultimo_play: string | null
 }
@@ -40,7 +40,6 @@ function formatarHora(iso?: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-// Converte File → base64 (persiste no banco, sobrevive ao reload)
 function fileParaBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -50,7 +49,6 @@ function fileParaBase64(file: File): Promise<string> {
   })
 }
 
-// Calcula segundos decorridos desde o último play até agora
 function segundosDesdePlay(ultimoPlay: string | null): number {
   if (!ultimoPlay) return 0
   return Math.floor((Date.now() - new Date(ultimoPlay).getTime()) / 1000)
@@ -75,27 +73,22 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
   const router = useRouter()
   const { id } = use(params)
 
-  const [carregando, setCarregando]     = useState(true)
-  const [processando, setProcessando]   = useState(false)
-  const [salvando, setSalvando]         = useState(false)
-  const [visita, setVisita]             = useState<any>(null)
-  const [aba, setAba]                   = useState<'checklist' | 'fotos' | 'resumo'>('checklist')
-  const [novoItem, setNovoItem]         = useState('')
+  const [carregando, setCarregando]   = useState(true)
+  const [processando, setProcessando] = useState(false)
+  const [salvando, setSalvando]       = useState(false)
+  const [visita, setVisita]           = useState<any>(null)
+  const [aba, setAba]                 = useState<'checklist' | 'fotos' | 'resumo'>('checklist')
+  const [novoItem, setNovoItem]       = useState('')
 
-  // ─── Dados da vistoria ───
-  const [itens, setItens]               = useState<ItemChecklist[]>([])
-  const [fotosGerais, setFotosGerais]   = useState<string[]>([])
-  const [resumo, setResumo]             = useState('')
+  const [itens, setItens]             = useState<ItemChecklist[]>([])
+  const [fotosGerais, setFotosGerais] = useState<string[]>([])
+  const [resumo, setResumo]           = useState('')
 
-  // ─── Cronômetro ─────────────────────────────────────────
-  // Usamos refs para os valores do cronômetro para evitar
-  // race conditions entre setState e o intervalo
-  const tempoAcumRef   = useRef(0)   // segundos já contados antes do Play atual
-  const ultimoPlayRef  = useRef<string | null>(null) // ISO do último Play
-  const statusRef      = useRef<StatusVisita>('agendada')
+  const tempoAcumRef  = useRef(0)
+  const ultimoPlayRef = useRef<string | null>(null)
+  const statusRef     = useRef<StatusVisita>('agendada')
   const [displaySeg, setDisplaySeg] = useState(0)
 
-  // Autosave: ref com os dados mais recentes para o intervalo usar
   const dadosRef = useRef<{ itens: ItemChecklist[]; resumo: string; fotosGerais: string[] }>({
     itens: [], resumo: '', fotosGerais: [],
   })
@@ -115,11 +108,11 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
         statusRef.current = data.status
 
         const dv: Partial<DadosVistoria> = data.dados_vistoria ?? {}
-        const itensCarregados  = dv.itens        ?? []
-        const resumoCarregado  = dv.resumo        ?? ''
-        const fotosCarregadas  = dv.fotosGerais   ?? []
-        const tempoCarregado   = dv.tempo_acumulado ?? 0
-        const playCarregado    = dv.ultimo_play     ?? null
+        const itensCarregados = dv.itens            ?? []
+        const resumoCarregado = dv.resumo            ?? ''
+        const fotosCarregadas = dv.fotosGerais       ?? []
+        const tempoCarregado  = dv.tempo_acumulado   ?? 0
+        const playCarregado   = dv.ultimo_play        ?? null
 
         setItens(itensCarregados)
         setResumo(resumoCarregado)
@@ -129,7 +122,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
         ultimoPlayRef.current = playCarregado
         dadosRef.current      = { itens: itensCarregados, resumo: resumoCarregado, fotosGerais: fotosCarregadas }
 
-        // Display inicial: tempo acumulado + o que já correu desde o último play
         setDisplaySeg(tempoCarregado + segundosDesdePlay(playCarregado))
       } catch {
         toast.error('Visita não encontrada.')
@@ -142,7 +134,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
   }, [id, router])
 
   // ─── 2. Ticker do cronômetro ─────────────────────────────
-  // Usa refs → nunca precisa de cleanup por mudança de status
   useEffect(() => {
     const tick = setInterval(() => {
       if (statusRef.current !== 'em_andamento') return
@@ -150,7 +141,7 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
       setDisplaySeg(total)
     }, 1000)
     return () => clearInterval(tick)
-  }, []) // roda UMA vez e fica vivo enquanto o componente existir
+  }, [])
 
   // ─── 3. Autosave a cada 30s ──────────────────────────────
   useEffect(() => {
@@ -165,29 +156,25 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
         await supabase.from('visitas').update({ dados_vistoria: payload }).eq('id', visita.id)
         toast.info('Rascunho salvo automaticamente', { duration: 1500 })
       } catch {
-        // silencia — o usuário ainda pode salvar manualmente
+        // silencia
       }
     }, 30_000)
     return () => clearInterval(autosave)
   }, [visita?.id])
 
-  // Mantém dadosRef sincronizado com o estado React
   useEffect(() => { dadosRef.current = { itens, resumo, fotosGerais } }, [itens, resumo, fotosGerais])
 
-  // ─── 4. Mudança de status + salva tempo ─────────────────
+  // ─── 4. Mudança de status ────────────────────────────────
   const mudarStatus = useCallback(async (novoStatus: StatusVisita) => {
     setProcessando(true)
     const agora = new Date().toISOString()
 
-    // Calcula o novo tempo acumulado ANTES de alterar os refs
     let novoTempoAcum = tempoAcumRef.current
     let novoUltimoPlay: string | null = ultimoPlayRef.current
 
     if (novoStatus === 'em_andamento') {
-      // Play: registra o momento exato
       novoUltimoPlay = agora
     } else {
-      // Pause ou Finalizar: soma o que correu desde o último play
       novoTempoAcum += segundosDesdePlay(ultimoPlayRef.current)
       novoUltimoPlay = null
     }
@@ -209,7 +196,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
       const { error } = await supabase.from('visitas').update(atualizacoes).eq('id', visita.id)
       if (error) throw error
 
-      // Confirma no banco → atualiza refs e estado
       tempoAcumRef.current  = novoTempoAcum
       ultimoPlayRef.current = novoUltimoPlay
       statusRef.current     = novoStatus
@@ -271,7 +257,7 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
     const b64 = await fileParaBase64(file)
     const item = itens.find(i => i.id === itemId)
     if (item) atualizarItem(itemId, 'fotos', [...(item.fotos ?? []), b64])
-    e.target.value = '' // permite reselecionar o mesmo arquivo
+    e.target.value = ''
   }
 
   function removerFotoItem(itemId: string, idx: number) {
@@ -287,7 +273,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
     e.target.value = ''
   }
 
-  // ─── Contadores para o resumo visual ─────────────────────
   const totalOk     = itens.filter(i => i.status === 'ok').length
   const totalAlerta = itens.filter(i => i.status === 'alerta').length
   const totalFalha  = itens.filter(i => i.status === 'falha').length
@@ -302,9 +287,9 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
   if (!visita) return null
 
   const status: StatusVisita = visita.status
-  const estaRodando  = status === 'em_andamento'
+  const estaRodando   = status === 'em_andamento'
   const podeTrabalhrar = status !== 'agendada'
-  const concluida    = status === 'concluida'
+  const concluida     = status === 'concluida'
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
@@ -331,7 +316,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
           <div className="p-5 space-y-4">
 
-            {/* Botão iniciar */}
             {status === 'agendada' && (
               <button
                 onClick={() => mudarStatus('em_andamento')}
@@ -342,7 +326,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
               </button>
             )}
 
-            {/* Cronômetro */}
             {podeTrabalhrar && (
               <>
                 <div className="flex items-center justify-between bg-gray-50 rounded-xl p-4 border border-gray-100">
@@ -365,7 +348,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                   </div>
                 </div>
 
-                {/* Botões de controle */}
                 {!concluida && (
                   <div className="flex gap-3">
                     {estaRodando ? (
@@ -397,7 +379,7 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                   </div>
                 )}
 
-                {/* Link para gerar laudo — só após concluída */}
+                {/* FIX: rota corrigida de /laudos/novo?visita=X para /visitas/[id]/laudo */}
                 {concluida && (
                   <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
                     <div>
@@ -405,7 +387,7 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                       <p className="text-xs text-green-600 mt-0.5">Agora você pode gerar o laudo técnico.</p>
                     </div>
                     <Link
-                      href={`/laudos/novo?visita=${visita.id}`}
+                      href={`/visitas/${visita.id}/laudo`}
                       className="bg-green-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-800 transition font-medium whitespace-nowrap"
                     >
                       Gerar laudo →
@@ -421,7 +403,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
         {podeTrabalhrar && (
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
 
-            {/* Abas */}
             <div className="flex border-b border-gray-200 bg-gray-50">
               {[
                 { id: 'checklist' as const, label: '✅ Inspeção' },
@@ -447,7 +428,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
               {/* ── ABA: CHECKLIST ── */}
               {aba === 'checklist' && (
                 <div className="space-y-5">
-                  {/* Contadores */}
                   {itens.length > 0 && (
                     <div className="grid grid-cols-3 gap-2 text-center text-xs">
                       <div className="bg-green-50 border border-green-200 rounded-lg py-2">
@@ -465,7 +445,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                     </div>
                   )}
 
-                  {/* Adicionar item */}
                   {!concluida && (
                     <form onSubmit={adicionarItem} className="flex gap-2">
                       <input
@@ -485,7 +464,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                     </form>
                   )}
 
-                  {/* Lista de itens */}
                   {itens.length === 0 ? (
                     <div className="text-center py-12 text-gray-400">
                       <span className="text-4xl block mb-3">📋</span>
@@ -517,7 +495,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                             )}
                           </div>
 
-                          {/* Botões de status */}
                           <div className="flex gap-2">
                             {[
                               { val: 'ok'     as const, label: '✅ OK',      ativo: 'bg-green-100 border-green-400 text-green-800' },
@@ -537,7 +514,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                             ))}
                           </div>
 
-                          {/* Observação */}
                           <textarea
                             placeholder="Anotação opcional..."
                             className="w-full mt-3 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-900 transition resize-none"
@@ -547,11 +523,10 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                             onChange={e => atualizarItem(item.id, 'obs', e.target.value)}
                           />
 
-                          {/* Fotos do item */}
                           <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2 items-center">
                             {item.fotos?.map((src, i) => (
                               <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-gray-200 group">
-                                <img src={src} alt="Evidência" className="object-cover w-full h-full" />
+                                <img src={src} alt={`Evidência ${i + 1} de ${item.titulo}`} className="object-cover w-full h-full" />
                                 {!concluida && (
                                   <button
                                     onClick={() => removerFotoItem(item.id, i)}
@@ -581,7 +556,7 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                   <div className="flex flex-wrap gap-3">
                     {fotosGerais.map((src, i) => (
                       <div key={i} className="relative w-24 h-24 rounded-xl overflow-hidden border border-gray-200 group">
-                        <img src={src} className="object-cover w-full h-full" alt="Foto geral" />
+                        <img src={src} className="object-cover w-full h-full" alt={`Foto geral ${i + 1}`} />
                         {!concluida && (
                           <button
                             onClick={() => setFotosGerais(prev => prev.filter((_, idx) => idx !== i))}
@@ -609,7 +584,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
                 <div className="space-y-4">
                   <p className="text-sm text-gray-500">Conclusões gerais que aparecerão no laudo final.</p>
 
-                  {/* Mini dashboard antes do resumo */}
                   {itens.length > 0 && (
                     <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-2">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Resumo da inspeção</p>
@@ -634,7 +608,7 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
 
                   <textarea
                     rows={8}
-                    placeholder="Ex: O local apresenta boas condições gerais, porém foram identificadas falhas no painel elétrico que requerem atenção imediata..."
+                    placeholder="Ex: O local apresenta boas condições gerais, porém foram identificadas falhas no painel elétrico..."
                     className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-gray-900 transition resize-none"
                     value={resumo}
                     disabled={concluida}
@@ -644,7 +618,6 @@ export default function DetalhesVisitaPage({ params }: { params: Promise<{ id: s
               )}
             </div>
 
-            {/* Rodapé com salvar */}
             {!concluida && (
               <div className="bg-gray-50 border-t border-gray-200 p-4 flex items-center justify-between">
                 <p className="text-xs text-gray-400">Autosave a cada 30 segundos</p>
